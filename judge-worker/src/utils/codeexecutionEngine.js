@@ -46,6 +46,7 @@ export async function ensureDockerImage(image) {
 }
 
 export async function startQueueConsumer() {
+  console.log("queuing consumer stated.........");
   while (true) {
     const { element } = await redis.blPop("execution_queue", 0);
     const job = JSON.parse(element);

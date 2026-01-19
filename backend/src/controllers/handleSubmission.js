@@ -1,67 +1,72 @@
-import redis from '../config/redisConfig.js'
+import redis from "../config/redisConfig.js";
+import Submission from "../models/Submission.js";
+import Language from "../models/Language.js";
+import TestCase from "../models/TestCaseSchema.js";
 
-const codeSubmission = async (req, res) => {
-  console.log(req.body);
-  const { codebody, language, input, expectedoutput, submissionId, userId ,problemId} = req.body;  
+
+export const codeSubmission = async (req, res) => {
   try {
-    if (!codebody || !submissionId || !userId || !language || !problemId) {
-      return res.status(404).json({
+    const { codebody, language, userId, problemId } = req.body;
+
+    if (!codebody || !language || !userId || !problemId) {
+      return res.status(400).json({
         success: false,
-        message: "all field required"
+        message: "All fields are required"
       });
     }
 
-    //check user authentication first -> to-do
-    
-    //to-do submit the submission to the database 
-    //also submit their test cases in the data base 
-
-      //prepare the job to pass the job_queue
-    const jobData= {
-      code: codebody,
-      language: language,
-      problemId,
-      input: input || [""],
-      expectedoutput:expectedoutput || [""],
-      submissionId: submissionId,
-      userId: userId,
-      submissionTime: new Date().toISOString()
-    }
-  
-    //push job to the redis queue here
-
-    const job= await redis.lPush(
-            "execution_queue",
-            JSON.stringify({
-              submissionId,
-              problemId,
-              language,
-              sourceCode: codebody
-            })
-    );
-
-    //give user a response the the code is submitted and running
-
-    if (job) {
-      return res.status(200).json({
-        success: true,
-        message:"code processing start......."
-       })
-    }
-    else {
-      return res.status(200).json({
+    // ✅ Validate language
+    const lang = await Language.findOne({ key: language });
+    if (!lang) {
+      return res.status(400).json({
         success: false,
-        message:"code execution got failed",
-      })
+        message: "Unsupported language"
+      });
     }
-  }
-  catch (err) {
-    console.log(err);
-    res.status(505).json({
-      success: false,
-      message: "internal server error",
-     })
-  }
-}
 
-export default codeSubmission;
+    // ✅ Ensure test cases exist
+    const testCaseCount = await TestCase.countDocuments({ problemId });
+    if (testCaseCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No test cases found for this problem"
+      });
+    }
+
+    // ✅ Create submission
+    const submission = await Submission.create({
+      userId,
+      problemId,
+      language,
+      sourceCode: codebody,
+      status: "QUEUED",
+      testResults: []
+    });
+
+    // ✅ Minimal job payload (IMPORTANT)
+    const jobData = {
+      submissionId: submission._id,
+      problemId,
+      language
+    };
+
+    // ✅ Push to execution queue
+    await redis.lPush("execution_queue", JSON.stringify(jobData));
+
+    return res.status(200).json({
+      success: true,
+      message: "Code submission successful",
+      submissionId: submission._id
+    });
+
+  } catch (err) {
+    console.error("Submission error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+};
+
+
+

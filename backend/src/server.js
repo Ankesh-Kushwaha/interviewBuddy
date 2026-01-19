@@ -4,6 +4,8 @@ import mongoose from 'mongoose';
 import submissionRoute from './routes/handleSubmissionRoute.js';
 import redis from './config/redisConfig.js';
 import { environment } from './utils/env.js';
+import problemRoute from './routes/problemsRoutes.js'
+import testCaseRoute from './routes/TestCaseRoutes.js'
 
 const app = express();
 const PORT = 3000;
@@ -26,7 +28,9 @@ app.get('/health', (req, res) => {
 })();
 
 // ✅ correct route mounting
-app.use('/api', submissionRoute);
+app.use('/api/submission', submissionRoute);
+app.use('/api/problems', problemRoute);
+app.use('/api/testcase', testCaseRoute);
 
 app.listen(PORT, () => {
   console.log(`server is listening on port:${PORT}`);

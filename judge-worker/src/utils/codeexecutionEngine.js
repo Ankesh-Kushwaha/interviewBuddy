@@ -1,31 +1,30 @@
-import fs from 'fs'
-import path from 'path';
-import os from 'os';
-import redis from '../config/redisConfig.js'
-import{ Submission} from '../models/Submission.js';
-import Language from '../models/Language.js'
-import { TestCase } from '../models/Submission.js'
+import fs from "fs";
+import path from "path";
+import os from "os";
+import { execFile } from "child_process";
 
+import redis from "../config/redisConfig.js";
+import Submission from "../models/Submission.js";
+import TestCase from "../models/TestCase.js";
+import Language from "../models/Language.js";
+import ExecutionJob from "../models/ExecutionJob.js";
 
-const pulledImages = new Set(); // set for caching the pulled images
+/* ------------------------------------------------------------------ */
+/* ---------------------- Docker Image Cache -------------------------- */
+/* ------------------------------------------------------------------ */
 
-/**
- * Ensure docker image exists locally.
- * Pulls it once and caches it.
- */
+const pulledImages = new Set();
 
-export async function ensureDockerImage(image) {
+async function ensureDockerImage(image) {
   if (pulledImages.has(image)) return;
 
   await new Promise((resolve, reject) => {
-    // Check if image exists
     execFile("docker", ["image", "inspect", image], (err) => {
       if (!err) {
         pulledImages.add(image);
         return resolve();
       }
 
-      // Image not found → pull
       execFile(
         "docker",
         ["pull", image],
@@ -36,7 +35,6 @@ export async function ensureDockerImage(image) {
               new Error(`Failed to pull Docker image: ${image}`)
             );
           }
-
           pulledImages.add(image);
           resolve();
         }
@@ -45,26 +43,53 @@ export async function ensureDockerImage(image) {
   });
 }
 
+/* ------------------------------------------------------------------ */
+/* ---------------------- Queue Consumer ------------------------------ */
+/* ------------------------------------------------------------------ */
+
 export async function startQueueConsumer() {
-  console.log("queuing consumer stated.........");
+  console.log("🚀 Judge worker started...");
+
   while (true) {
-    const { element } = await redis.blPop("execution_queue", 0);
-    const job = JSON.parse(element);
-    
-    //ensure the submission must be in dataabse;
-    const submission = await Submission.findById(job.submissionId);
-    if (!submission) continue;
+    try {
+      const { element } = await redis.blPop("execution_queue", 0);
+      const job = JSON.parse(element);
 
-    submission.status = "RUNNING";
-    await submission.save(); //save submission to the database;
+      const submission = await Submission.findById(job.submissionId);
+      if (!submission) continue;
 
-    await executeSubmission(job, submission);
+      submission.status = "RUNNING";
+      await submission.save();
+
+      await ExecutionJob.create({
+        submissionId: submission._id,
+        status: "RUNNING",
+        workerId: os.hostname(),
+        startedAt: new Date()
+      });
+
+      await executeSubmission(submission);
+    } catch (err) {
+      console.error("❌ Worker loop error:", err);
+    }
   }
 }
 
-export async function executeSubmission(job, submission) {
-  const language = await Language.findOne({ key: job.language });
-  const testCases = await TestCase.find({ problemId: job.problemId });
+/* ------------------------------------------------------------------ */
+/* ---------------------- Submission Execution ------------------------ */
+/* ------------------------------------------------------------------ */
+
+async function executeSubmission(submission) {
+  const language = await Language.findOne({ key: submission.language });
+  if (!language) {
+    submission.status = "SYSTEM_ERROR";
+    await submission.save();
+    return;
+  }
+
+  const testCases = await TestCase.find({
+    problemId: submission.problemId
+  });
 
   let finalVerdict = "AC";
   let totalTime = 0;
@@ -72,48 +97,75 @@ export async function executeSubmission(job, submission) {
 
   for (const tc of testCases) {
     const result = await runSingleTest(
-      job.sourceCode,
+      submission.sourceCode,   // ✅ FIX: always read from DB
       tc.input,
       tc.output,
       language
     );
 
-    totalTime += result.time;
+    totalTime += result.time || 0;
+
     results.push({
       testCaseId: tc._id,
-      ...result
+      status: result.status,
+      time: result.time,
+      stdout: tc.isSample ? result.stdout : undefined,
+      stderr: result.stderr
     });
 
     if (result.status !== "AC") {
       finalVerdict = result.status;
-      break; //stop if the first test case failed
+      break;
     }
   }
 
   submission.status = finalVerdict;
   submission.totalTime = totalTime;
   submission.testResults = results;
-  await submission.save(); //save the status of the submission
-  console.log(`summission resullt of:${submission._id}`, submission);
-  //to-do
-  //pass all the submission to another queue from where the websocket server take submission with
-  //the problem id and return response to the user in real time 
+  await submission.save();
+
+  await ExecutionJob.updateOne(
+    { submissionId: submission._id },
+    { status: "COMPLETED", finishedAt: new Date() }
+  );
+
+  // 🔥 Push final result to result queue
+  await redis.rPush(
+    "result_queue",
+    JSON.stringify({
+      submissionId: submission._id,
+      userId: submission.userId,
+      problemId: submission.problemId,
+      status: finalVerdict,
+      totalTime,
+      results
+    })
+  );
+
+  console.log(
+    `📤 Result pushed for submission ${submission._id} → ${finalVerdict}`
+  );
 }
+
+/* ------------------------------------------------------------------ */
+/* ---------------------- Single Test Runner -------------------------- */
+/* ------------------------------------------------------------------ */
 
 function normalizeOutput(output) {
   return output.replace(/\s+/g, " ").trim();
 }
 
 async function runSingleTest(code, input, expectedOutput, language) {
-  const MAX_OUTPUT_SIZE = 64 * 1024; // 64 KB
+  const MAX_OUTPUT_SIZE = 64 * 1024;
 
-   try {
+  if (!code) {
+    return { status: "SYSTEM_ERROR", stderr: "Source code missing" };
+  }
+
+  try {
     await ensureDockerImage(language.dockerImage);
-  } catch (err) {
-    return {
-      status: "SYSTEM_ERROR",
-      stderr: "Docker image unavailable"
-    };
+  } catch {
+    return { status: "SYSTEM_ERROR", stderr: "Docker image unavailable" };
   }
 
   return new Promise((resolve) => {
@@ -122,74 +174,115 @@ async function runSingleTest(code, input, expectedOutput, language) {
     const sourcePath = path.join(tmpDir, language.sourceFile);
     const inputPath = path.join(tmpDir, "input.txt");
 
-    fs.writeFileSync(sourcePath, code, { mode: 0o444 });
-    fs.writeFileSync(inputPath, input, { mode: 0o444 });
+    fs.writeFileSync(sourcePath, code);
+    fs.writeFileSync(inputPath, input);
 
-    const dockerArgs = [
+    const baseDockerArgs = [
       "run",
       "--rm",
       "--network", "none",
       "--read-only",
       "--pids-limit", "64",
-      "--memory", "256m",
+      "--memory", `${language.memoryLimit}m`,
       "--cpus", "0.5",
       "--security-opt", "no-new-privileges",
       "--cap-drop", "ALL",
       "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
-      "-v", `${tmpDir}:/workspace:ro`,
+      "-v", `${tmpDir}:/workspace:rw`,
+      "-w", "/workspace",
       language.dockerImage,
       "bash",
-      "-lc",
-      language.compileCmd
-        ? `${language.compileCmd} && ${language.runCmd} < input.txt`
-        : `${language.runCmd} < input.txt`
+      "-lc"
     ];
 
-    const start = Date.now();
+    /* ------------------ COMPILE STEP ------------------ */
+    if (language.compileCmd) {
+      execFile(
+        "docker",
+        [...baseDockerArgs, language.compileCmd],
+        { maxBuffer: MAX_OUTPUT_SIZE },
+        (compileErr, _stdout, compileErrOut) => {
+          if (compileErr) {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+            return resolve({
+              status: "CE",
+              stderr: compileErrOut || compileErr.message,
+              time: 0
+            });
+          }
 
+          /* ------------------ RUN STEP ------------------ */
+          const start = Date.now();
+
+          execFile(
+            "docker",
+            [...baseDockerArgs, `${language.runCmd} < input.txt`],
+            {
+              timeout: language.timeLimit,
+              maxBuffer: MAX_OUTPUT_SIZE
+            },
+            (runErr, stdout = "", stderr = "") => {
+              fs.rmSync(tmpDir, { recursive: true, force: true });
+
+              const rawTime = Date.now() - start;
+              const time = Math.min(rawTime, language.timeLimit);
+
+              if (runErr?.killed) {
+                return resolve({ status: "TLE", time });
+              }
+
+              if (runErr) {
+                return resolve({ status: "RE", stderr, time });
+              }
+
+              if (
+                normalizeOutput(stdout) !==
+                normalizeOutput(expectedOutput)
+              ) {
+                return resolve({ status: "WA", stdout, time });
+              }
+
+              return resolve({ status: "AC", stdout, time });
+            }
+          );
+        }
+      );
+      return;
+    }
+
+    /* ------------------ INTERPRETED LANG (Python) ------------------ */
+    const start = Date.now();
     execFile(
       "docker",
-      dockerArgs,
-      { timeout: 2000, maxBuffer: MAX_OUTPUT_SIZE },
+      [...baseDockerArgs, `${language.runCmd} < input.txt`],
+      {
+        timeout: language.timeLimit,
+        maxBuffer: MAX_OUTPUT_SIZE
+      },
       (err, stdout = "", stderr = "") => {
         fs.rmSync(tmpDir, { recursive: true, force: true });
 
-        const time = (Date.now() - start) / 1000;
+        const rawTime = Date.now() - start;
+        const time = Math.min(rawTime, language.timeLimit);
 
-        // ⛔ TLE
-        if (err && err.killed) {
+        if (err?.killed) {
           return resolve({ status: "TLE", time });
         }
 
-        // ⛔ Compilation Error
-        if (stderr && /error|undefined reference/i.test(stderr)) {
-          return resolve({ status: "CE", stderr });
-        }
-
-        // ⛔ Runtime Error
         if (err) {
-          return resolve({ status: "RE", stderr });
+          return resolve({ status: "RE", stderr, time });
         }
 
-        // ❗ Wrong Answer (normalized comparison)
         if (
           normalizeOutput(stdout) !==
           normalizeOutput(expectedOutput)
         ) {
-          return resolve({
-            status: "WA",
-            stdout,
-            time
-          });
+          return resolve({ status: "WA", stdout, time });
         }
 
-        // ✅ Accepted
-        return resolve({
-          status: "AC",
-          stdout,
-          time
-        });
+        return resolve({ status: "AC", stdout, time });
       }
     );
   });
 }
+

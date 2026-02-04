@@ -1,0 +1,77 @@
+version: "3.9"
+
+networks:
+  talentIq-network:
+    driver: bridge
+
+services:
+
+  redis:
+    image: redis:7
+    container_name: talentIq-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - talentIq-network
+
+  backend:
+    image: talentIq/backend:latest
+    container_name: talentIq-backend
+    env_file:
+      - ./backend/.env
+    ports:
+      - "3000:3000"
+    depends_on:
+      - redis
+    networks:
+      - talentIq-network
+
+  frontend:
+    image: talentIq/frontend:latest
+    container_name: talentIq-frontend
+    env_file:
+      - ./frontend/.env
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+    networks:
+      - talentIq-network
+
+  ai-coach-service:
+    image: talentIq/ai-coach-service:latest
+    container_name: talentIq-ai-coach
+    env_file:
+      - ./ai-coach-service/src/.env
+    ports:
+      - "8081:8081"
+    depends_on:
+      - backend
+      - redis
+    networks:
+      - talentIq-network
+
+  judge-worker:
+    image: talentIq/judge-worker:latest
+    container_name: talentIq-judge-worker
+    env_file:
+      - ./judge-worker/.env
+    depends_on:
+      - backend
+      - redis
+    networks:
+      - talentIq-network
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock 
+
+  result-consumer-service:
+    image: talentIq/result-consumer-service:latest
+    container_name: talentIq-result-consumer
+    env_file:
+      - ./resultConsumerservice/.env
+    ports:
+      - "3002:3002"
+    depends_on:
+      - redis
+    networks:
+      - talentIq-network

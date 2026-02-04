@@ -2,10 +2,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 import { WebSocketServer } from "ws";
 import { routePrompt } from "./promptRouter.js";
-import { GoogleGeminiAiLLMconnector,deepSeekLLMConnector,QubridAiLLMConnector } from "./LLMconnector.js";
-
-
-
+import { GoogleGeminiAiLLMconnector,deepSeekLLMConnector,QubridAiLLMConnector,sambolaAiConnector,parseSambolaStream } from "./LLMconnector.js";
 const wss = new WebSocketServer({ port: 8081 });
 
 function startServer() {
@@ -35,7 +32,6 @@ function startServer() {
         let prompt;
         try {
           prompt = await routePrompt(payload);
-          console.log("ROUTED PROMPT ✅:", prompt);
         } catch (err) {
           ws.send(JSON.stringify({
             type: "AI_ERROR",
@@ -57,7 +53,7 @@ function startServer() {
         }
 
         try {
-          for await (const chunk of QubridAiLLMConnector(prompt)) {
+          for await (const chunk of parseSambolaStream(sambolaAiConnector(prompt))) {
             if (ws.readyState === ws.OPEN) {
               ws.send(JSON.stringify({
                 type: "AI_MESSAGE",

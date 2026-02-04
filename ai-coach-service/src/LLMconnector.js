@@ -1,14 +1,15 @@
 import dotenv from 'dotenv';
 dotenv.config();
 import OpenAI from "openai";
-import {GoogleGenAI} from '@google/genai'
+import { GoogleGenAI } from '@google/genai'
+
+const API_KEY = process.env.SAMBANOVA_API_KEY;
 
 const openai = new OpenAI({
         baseURL: 'https://api.deepseek.com',
         apiKey: `${process.env.DEEPSEEK_API_KEY}`,
 });
 
-console.log("qubrid api key",process.env.QUIBRIDAI_API_KEY)
 const googleGeminiAi = new GoogleGenAI({
   apiKey:`${process.env.GEMINI_API_KEY}`
 });
@@ -39,8 +40,6 @@ export async function* GoogleGeminiAiLLMconnector(prompt) {
     throw err;
   }
 }
-
-
 
 export const deepSeekLLMConnector = async (prompt) => {
   try {
@@ -102,3 +101,65 @@ export async function* QubridAiLLMConnector(prompt) {
   }
 }
 
+export async function* sambolaAiConnector(prompt) {
+  try {
+    const res = await fetch("https://api.sambanova.ai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        stream: true,
+        model: "gpt-oss-120b",
+        messages: [
+          { role: "system", content: "You are a helpful assistant" },
+          { role: "user", content: prompt }
+        ]
+      })
+    });
+
+    if (!res.body) throw new Error("No response stream");
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      yield decoder.decode(value, { stream: true });
+    }
+
+  } catch (error) {
+    console.error("SambaNova stream error:", error);
+    throw error;
+  }
+}
+
+export async function* parseSambolaStream(streamGenerator) {
+  let buffer = "";
+
+  for await (const chunk of streamGenerator) {
+    buffer += chunk;
+
+    const events = buffer.split("\n\n");
+    buffer = events.pop(); 
+
+    for (const event of events) {
+      if (!event.startsWith("data:")) continue;
+
+      const payload = event.replace("data:", "").trim();
+      if (payload === "[DONE]") return;
+
+      try {
+        const json = JSON.parse(payload);
+        const token = json.choices?.[0]?.delta?.content;
+
+        if (token) yield token;
+      } catch {
+        console.log("error while parsing ai respone");
+      }
+    }
+  }
+}

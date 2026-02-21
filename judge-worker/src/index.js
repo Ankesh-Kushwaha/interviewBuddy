@@ -1,18 +1,14 @@
 import dotenv from "dotenv";
-dotenv.config({ path: ".env" }); // or correct path
-
-import { environment } from './utils/env.js';
+dotenv.config({ path: ".env" });
 import mongoose from 'mongoose';
 import redis from './config/redisConfig.js';
 import { startQueueConsumer } from './utils/codeexecutionEngine.js';
-
-console.log("DB_URL:", environment.DB_URL);
 
 (async () => {
   await redis.connect();
 
   mongoose
-    .connect("mongodb+srv://ankeshkush9651_db_user:TalentIq123@cluster0.uuuejzq.mongodb.net/")
+    .connect(process.env.DATABASE_URL)
     .then(() => console.log("Worker connected to Mongo"))
     .catch((err) => console.error("Worker Mongo error:", err));
 

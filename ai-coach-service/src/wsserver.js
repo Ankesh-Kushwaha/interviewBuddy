@@ -70,7 +70,6 @@ function startServer() {
             }));
           }
         } finally {
-          // 🧠 Thinking end
           if (ws.readyState === ws.OPEN) {
             ws.send(JSON.stringify({ type: "THINKING_END" }));
           }

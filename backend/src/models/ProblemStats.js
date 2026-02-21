@@ -1,4 +1,3 @@
-// models/ProblemStats.js
 import mongoose from "mongoose";
 
 const problemStatsSchema = new mongoose.Schema({

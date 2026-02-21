@@ -54,3 +54,4 @@
 2026-01-28 01:27:32 [ERROR]: error while getting a single problem :Cast to ObjectId failed for value "696e933e23962c3153a8202" (type string) at path "_id" for model "Problem"
 2026-01-31 01:33:23 [ERROR]: error while creating a problem :Problem validation failed: difficulty: `EASY` is not a valid enum value for path `difficulty`.
 2026-01-31 01:38:54 [ERROR]: error while creating a problem :Problem validation failed: difficulty: `EASY` is not a valid enum value for path `difficulty`.
+2026-02-21 23:14:24 [ERROR]: error while user sign in

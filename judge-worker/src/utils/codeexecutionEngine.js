@@ -9,7 +9,7 @@ import TestCase from "../models/TestCase.js";
 import Language from "../models/Language.js";
 import ExecutionJob from "../models/ExecutionJob.js";
 
-/* ---------------------- Docker Image Cache -------------------------- */
+
 
 const pulledImages = new Set();
 
@@ -45,7 +45,7 @@ async function ensureDockerImage(image) {
   });
 }
 
-/* ---------------------- Queue Consumer ------------------------------ */
+
 
 export async function startQueueConsumer() {
   console.log("🚀 Judge worker started...");
@@ -75,7 +75,7 @@ export async function startQueueConsumer() {
   }
 }
 
-/* ---------------------- Submission Execution ------------------------ */
+
 
 async function executeSubmission(submission) {
   const language = await Language.findOne({ key: submission.language });
@@ -148,7 +148,7 @@ async function executeSubmission(submission) {
   );
 }
 
-/* ---------------------- Single Test Runner -------------------------- */
+
 
 function normalizeOutput(output) {
   return output.replace(/\s+/g, " ").trim();
@@ -194,7 +194,7 @@ async function runSingleTest(code, input, expectedOutput, language) {
       "-lc"
     ];
 
-    /* ------------------ COMPILE STEP ------------------ */
+ 
     if (language.compileCmd) {
       execFile(
         "docker",

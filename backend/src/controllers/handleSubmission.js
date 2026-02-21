@@ -120,7 +120,7 @@ export const getAllUserSubmission = async (req, res) => {
   const submissions = await Submission.find(
       { userId },
       {
-        sourceCode: 0,          // ❌ exclude heavy fields
+        sourceCode: 0,         
         testResults: 0,
       }
     )

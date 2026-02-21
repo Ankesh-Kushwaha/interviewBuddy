@@ -1,31 +1,50 @@
-export const userConnections = new Map();
-
-export function addConnection(userId, ws) {
-  if (!userConnections.has(userId)) {
-    userConnections.set(userId, new Set());
+class connectionManager{
+  costructor() {
+    if (connectionManager.instance) {
+      return connectionManager.instance;
+    }
+    
+    this.userConnections = new Map();
+    connectionManager.instance = this;
   }
-  userConnections.get(userId).add(ws);
-}
-
-export function removeConnection(userId, ws) {
-  const set = userConnections.get(userId);
-  if (!set) return;
-
-  set.delete(ws);
-  if (set.size === 0) {
-    userConnections.delete(userId);
+  
+  static getInstance() {
+    if (!connectionManager.instance) {
+      connectionManager.instance = new connectionManager();
+    }
+    return connectionManager.instance;
   }
-}
 
-export function sendToUser(userId, payload) {
-  const connections = userConnections.get(userId);
-  if (!connections) return;
+  addConnection(userId,ws) {
+    const existing = this.userConnections.get(userId);
 
-  const message = JSON.stringify(payload);
+    if (existing && existing.readyState == ws.OPEN) {
+      existing.close(4000, "Another session opened");
+    }
 
-  for (const ws of connections) {
-    if (ws.readyState === ws.OPEN) {
-      ws.send(message);
+    this.userConnections.set(userId, ws);
+  }
+
+  removeConnection(userId, ws) {
+    const existing = this.userConnections.get(userId);
+    if (existing === ws) {
+      this.userConnections.delete(userId);
     }
   }
+
+  sendToUser(userId, payload) {
+    const ws = this.userConnections.get(userId);
+    if (!ws) return;
+
+    if (ws.readyState === ws.OPEN) {
+      ws.send(JSON.stringify(payload));
+    }
+  }
+
+  isConnected(userId) {
+    const ws = this.userConnections.get(userId);
+    return ws && ws.readyState === ws.OPEN;
+  }
 }
+
+export default connectionManager.getInstance();

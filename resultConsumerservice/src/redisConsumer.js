@@ -1,5 +1,5 @@
 import redis from '../config/redisConfig.js';
-import { sendToUser } from "./connectionStore.js";
+import { connectionManager } from './connectionStore.js';
 
 export async function startResultConsumer() {
   console.log("📡 Redis result consumer started...");
@@ -9,7 +9,7 @@ export async function startResultConsumer() {
       const { element } = await redis.blPop("result_queue", 0);
       const result = JSON.parse(element);
 
-      sendToUser(result.userId.toString(), {
+      connectionManager.sendToUser(result.userId.toString(), {
         type: "SUBMISSION_RESULT",
         payload: result
       });

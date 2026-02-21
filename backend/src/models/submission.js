@@ -1,7 +1,5 @@
 import mongoose from 'mongoose';
 
-// models/Submission.js
-
 const submissionSchema = new mongoose.Schema({
   userId: {
     type: mongoose.Schema.Types.ObjectId,

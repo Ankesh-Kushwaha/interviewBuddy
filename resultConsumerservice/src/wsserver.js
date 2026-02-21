@@ -1,5 +1,5 @@
 import { WebSocketServer } from "ws";
-import { addConnection, removeConnection } from "./connectionStore.js";
+import { connectionManager } from "./connectionStore";
 
 export function startWebSocketServer(server) {
   const wss = new WebSocketServer({ server });
@@ -13,16 +13,16 @@ export function startWebSocketServer(server) {
       return;
     }
 
-    addConnection(userId, ws);
+    connectionManager.addConnection(userId, ws);
     console.log(`🔌 User ${userId} connected`);
 
     ws.on("close", () => {
-      removeConnection(userId, ws);
+      connectionManager.removeConnection(userId, ws);
       console.log(`❌ User ${userId} disconnected`);
     });
 
     ws.on("error", () => {
-      removeConnection(userId, ws);
+      connectionManager.removeConnection(userId, ws);
     });
   });
 
